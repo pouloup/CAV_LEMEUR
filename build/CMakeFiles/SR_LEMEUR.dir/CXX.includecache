@@ -1,0 +1,12 @@
+#IncludeRegexLine: ^[ 	]*#[ 	]*(include|import)[ 	]*[<"]([^">]+)([">])
+
+#IncludeRegexScan: ^.*$
+
+#IncludeRegexComplain: ^$
+
+#IncludeRegexTransform: 
+
+/home/octopus/Documents/ESIR/CAV/CAV_LEMEUR/src/main.cpp
+opencv2/core.hpp
+/home/octopus/Documents/ESIR/CAV/CAV_LEMEUR/src/opencv2/core.hpp
+

@@ -8,23 +8,40 @@
 using namespace std;
 using namespace cv;
 
+/*
+ * TODO : Pick les ROI pour toutes les images, prendre les 15 premiers points par ex et matcher les deux dictionnaires.
+ */
 void pickROI(vector<cv::Mat> &data, vector<cv::Mat> &bl_data){
-  
+
+  cv::Ptr< cv::Feature2D > detector = cv::xfeatures2d::SIFT::create(0,numScales,peakThresh,edgeThresh,sigmaScale);
+
+  // Extraction de key points
+  std::vector< cv::KeyPoint> keyPts;
+  detector->detect(img,keyPts);
+
+  //Flitrage des key points
+  // Je te conseil d'utiliser des filtres sur tes keyPoints histoire de bien adapter des données à ton application
+  cv::KeyPointsFilter filter;
+  if( mConfig.keyPointSizeMax > 0.0f )
+  {
+     double sizeMin = 2.0 ; // J'enleve les keyPoint dont l'echelle est inferieur à 2 pixels. Il y a d'autres filtres possibles...
+     filter.runByKeypointSize(keyPts,sizeMin);
+  }
+
+  // extraction des descripteurs
+  cv::Mat descriptors;
+  detector->compute(img,keyPts,descriptors);
 }
 
 void conv2(vector<cv::Mat> &data, vector<cv::Mat> &bl_data, int kernel_size)
 {
     Mat dst, kernel;
     kernel = Mat::ones( kernel_size, kernel_size, CV_32F )/ (float)(kernel_size*kernel_size);
-    //namedWindow( "test", CV_WINDOW_AUTOSIZE );
+
     /// Apply filter
     for(int i = 0; i < data.size(); ++i){
-      //imshow( "test", data[i] );
-      //waitKey(0);
       filter2D(data[i], dst, -1 , kernel, Point( -1, -1 ), 0, BORDER_DEFAULT );
       bl_data.push_back(dst);
-      //imshow( "test", dst );
-      //waitKey(0);
     }
 }
 

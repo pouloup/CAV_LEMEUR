@@ -9,4 +9,12 @@
 /home/octopus/Documents/ESIR/CAV/CAV_LEMEUR/src/main.cpp
 opencv2/core.hpp
 /home/octopus/Documents/ESIR/CAV/CAV_LEMEUR/src/opencv2/core.hpp
+opencv2/highgui.hpp
+/home/octopus/Documents/ESIR/CAV/CAV_LEMEUR/src/opencv2/highgui.hpp
+opencv2/imgproc.hpp
+/home/octopus/Documents/ESIR/CAV/CAV_LEMEUR/src/opencv2/imgproc.hpp
+iostream
+-
+vector
+-
 

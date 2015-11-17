@@ -1,6 +1,7 @@
 #include "opencv2/core.hpp"
 #include "opencv2/highgui.hpp"
 #include "opencv2/imgproc.hpp"
+#include "opencv2/features2d.hpp"
 
 #include <iostream>
 #include <vector>
@@ -8,42 +9,8 @@
 using namespace std;
 using namespace cv;
 
-/*
- * TODO : Pick les ROI pour toutes les images, prendre les 15 premiers points par ex et matcher les deux dictionnaires.
- */
-void pickROI(vector<cv::Mat> &data, vector<cv::Mat> &bl_data){
-
-  cv::Ptr< cv::Feature2D > detector = cv::xfeatures2d::SIFT::create(0,numScales,peakThresh,edgeThresh,sigmaScale);
-
-  // Extraction de key points
-  std::vector< cv::KeyPoint> keyPts;
-  detector->detect(img,keyPts);
-
-  //Flitrage des key points
-  // Je te conseil d'utiliser des filtres sur tes keyPoints histoire de bien adapter des données à ton application
-  cv::KeyPointsFilter filter;
-  if( mConfig.keyPointSizeMax > 0.0f )
-  {
-     double sizeMin = 2.0 ; // J'enleve les keyPoint dont l'echelle est inferieur à 2 pixels. Il y a d'autres filtres possibles...
-     filter.runByKeypointSize(keyPts,sizeMin);
-  }
-
-  // extraction des descripteurs
-  cv::Mat descriptors;
-  detector->compute(img,keyPts,descriptors);
-}
-
-void conv2(vector<cv::Mat> &data, vector<cv::Mat> &bl_data, int kernel_size)
-{
-    Mat dst, kernel;
-    kernel = Mat::ones( kernel_size, kernel_size, CV_32F )/ (float)(kernel_size*kernel_size);
-
-    /// Apply filter
-    for(int i = 0; i < data.size(); ++i){
-      filter2D(data[i], dst, -1 , kernel, Point( -1, -1 ), 0, BORDER_DEFAULT );
-      bl_data.push_back(dst);
-    }
-}
+void conv2(vector<cv::Mat> &data, vector<cv::Mat> &bl_data, int kernel_size);
+void pickROI(vector<cv::Mat> &data, vector<cv::Mat> &bl_data);
 
 int main(int argc, char** argv){
 
@@ -65,5 +32,55 @@ int main(int argc, char** argv){
   conv2(data, bl_data, 3);
   if(data.size() != bl_data.size()) cerr << "Error during convolution : no such same number of images.";
 
+  pickROI(data, bl_data);
+
   return 0;
 }
+
+void conv2(vector<cv::Mat> &data, vector<cv::Mat> &bl_data, int kernel_size){
+	Mat dst, kernel;
+	kernel = Mat::ones(kernel_size, kernel_size, CV_32F) / (float)(kernel_size*kernel_size);
+
+	/// Apply filter
+	for (unsigned int i = 0; i < data.size(); ++i){
+		filter2D(data[i], dst, -1, kernel, Point(-1, -1), 0, BORDER_DEFAULT);
+		bl_data.push_back(dst);
+	}
+}
+
+/*
+* TODO : Pick les ROI pour toutes les images, Harris blobs detection.
+*/
+void pickROI(vector<cv::Mat> &data, vector<cv::Mat> &bl_data){
+	// Setup SimpleBlobDetector parameters.
+	SimpleBlobDetector::Params params;
+
+	// Change thresholds
+	//params.minThreshold = 10;
+	//params.maxThreshold = 200;
+
+	// Filter by Area.
+	params.filterByArea = true;
+	params.minArea = 1500;
+
+	// Set up the detector with default parameters.
+
+	Ptr<SimpleBlobDetector> detector = SimpleBlobDetector::create(params);
+	// SimpleBlobDetector::create creates a smart pointer. 
+	// So you need to use arrow ( ->) instead of dot ( . )
+	// detector->detect( im, keypoints);
+
+	// Detect blobs.
+	std::vector<KeyPoint> keypoints;
+	detector->detect(data[0], keypoints);
+
+	// Draw detected blobs as red circles.
+	// DrawMatchesFlags::DRAW_RICH_KEYPOINTS flag ensures the size of the circle corresponds to the size of blob
+	Mat im_with_keypoints;
+	drawKeypoints(data[0], keypoints, im_with_keypoints, Scalar(0, 0, 255), DrawMatchesFlags::DRAW_RICH_KEYPOINTS);
+
+	// Show blobs
+	imshow("keypoints", im_with_keypoints);
+	waitKey(0);
+}
+

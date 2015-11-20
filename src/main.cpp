@@ -23,7 +23,7 @@ int main(int argc, char** argv){
   cv::glob(path,fn,true); // recurse.
 
   for (size_t k=0; k<fn.size(); ++k){
-    Mat im = imread(fn[k]);
+    Mat im = imread(fn[k]/*, IMREAD_GRAYSCALE*/);
     if( !im.data ) cout <<  "Could not open or find an image" << endl;  // Check for invalid input.
     data.push_back(im);
   }
@@ -56,23 +56,33 @@ void pickROI(vector<cv::Mat> &data, vector<cv::Mat> &bl_data){
 	SimpleBlobDetector::Params params;
 
 	// Change thresholds
-	//params.minThreshold = 10;
-	//params.maxThreshold = 200;
+	params.minThreshold = 10;
+	params.maxThreshold = 200;
 
 	// Filter by Area.
 	params.filterByArea = true;
-	params.minArea = 1500;
+	params.minArea = 3;
+  /*
+  1  = 157 area detected
+  3  = 74  area detected
+  5  = 43  area detected
+  7  = 18  area detected
+  10 = 6   area detected
+  */
+
 
 	// Set up the detector with default parameters.
 
 	Ptr<SimpleBlobDetector> detector = SimpleBlobDetector::create(params);
-	// SimpleBlobDetector::create creates a smart pointer. 
+	// SimpleBlobDetector::create creates a smart pointer.
 	// So you need to use arrow ( ->) instead of dot ( . )
 	// detector->detect( im, keypoints);
 
 	// Detect blobs.
 	std::vector<KeyPoint> keypoints;
 	detector->detect(data[0], keypoints);
+
+  std::cout << keypoints.size() << std::endl;
 
 	// Draw detected blobs as red circles.
 	// DrawMatchesFlags::DRAW_RICH_KEYPOINTS flag ensures the size of the circle corresponds to the size of blob
@@ -83,4 +93,3 @@ void pickROI(vector<cv::Mat> &data, vector<cv::Mat> &bl_data){
 	imshow("keypoints", im_with_keypoints);
 	waitKey(0);
 }
-

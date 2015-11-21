@@ -9,16 +9,16 @@
 using namespace std;
 using namespace cv;
 
-void conv2(vector<cv::Mat> &data, vector<cv::Mat> &bl_data, int kernel_size);
-void pickROI(vector<cv::Mat> &data, vector<cv::Mat> &bl_data);
+void conv2(vector<Mat> &data, vector<Mat> &bl_data, int kernel_size);
+void pickROI(vector<Mat> &data, vector<Mat> &bl_data, vector<Mat> &HR_dic, vector<Mat> &LR_dic);
 
 int main(int argc, char** argv){
 
   cv::String path("../data/training/*.bmp"); //select only bmp.
 
   vector<cv::String> fn;
-  vector<Mat> data; //HR Images.
-  vector<Mat> bl_data; //Blurred HR Images.
+  vector<Mat> data, bl_data; //Blurred HR Images.
+  vector<Mat> HR_dic, LR_dic;
 
   cv::glob(path,fn,true); // recurse.
 
@@ -30,9 +30,9 @@ int main(int argc, char** argv){
 
   //Blurring the HR images.
   conv2(data, bl_data, 3);
-  if(data.size() != bl_data.size()) cerr << "Error during convolution : no such same number of images.";
+  if(data.size() != bl_data.size()) cerr << "Error during convolution : number of images is irrelevant.";
 
-  pickROI(data, bl_data);
+  pickROI(data, bl_data, HR_dic, LR_dic);
 
   return 0;
 }
@@ -48,10 +48,8 @@ void conv2(vector<cv::Mat> &data, vector<cv::Mat> &bl_data, int kernel_size){
 	}
 }
 
-/*
-* TODO : Pick les ROI pour toutes les images, Harris blobs detection.
-*/
-void pickROI(vector<cv::Mat> &data, vector<cv::Mat> &bl_data){
+void pickROI(vector<Mat> &data, vector<Mat> &bl_data, vector<Mat> &HR_dic, vector<Mat> &LR_dic){
+
 	// Setup SimpleBlobDetector parameters.
 	SimpleBlobDetector::Params params;
 
@@ -61,7 +59,7 @@ void pickROI(vector<cv::Mat> &data, vector<cv::Mat> &bl_data){
 
 	// Filter by Area.
 	params.filterByArea = true;
-	params.minArea = 3;
+	params.minArea = 5;
   /*
   1  = 157 area detected
   3  = 74  area detected
@@ -72,24 +70,37 @@ void pickROI(vector<cv::Mat> &data, vector<cv::Mat> &bl_data){
 
 
 	// Set up the detector with default parameters.
-
 	Ptr<SimpleBlobDetector> detector = SimpleBlobDetector::create(params);
-	// SimpleBlobDetector::create creates a smart pointer.
-	// So you need to use arrow ( ->) instead of dot ( . )
-	// detector->detect( im, keypoints);
 
-	// Detect blobs.
-	std::vector<KeyPoint> keypoints;
-	detector->detect(data[0], keypoints);
+  for(int i = 0; i < data.size(); ++i){
+  	// Detect blobs of important area in not blurred picture i.
+  	vector<KeyPoint> keypoints;
+  	detector->detect(data[i], keypoints);
 
-  std::cout << keypoints.size() << std::endl;
+    /*
+      retrieve a cv::Size patch with the keypoints as center.
+      and then create dictionaries with similar patches but one is from the HR images
+      and the other is from the same images but blurred.
+    */
+
+    for(int j = 0; j < keypoints.size(); ++j){
+      Mat patch_HR, patch_HR_bl;
+      getRectSubPix(data[i], cv::Size(5,5), keypoints[j].pt, patch_HR);
+      getRectSubPix(bl_data[i], cv::Size(5,5), keypoints[j].pt, patch_HR_bl);
+
+      HR_dic.push_back(patch_HR);
+      LR_dic.push_back(patch_HR_bl);
+    }
+  }
 
 	// Draw detected blobs as red circles.
 	// DrawMatchesFlags::DRAW_RICH_KEYPOINTS flag ensures the size of the circle corresponds to the size of blob
-	Mat im_with_keypoints;
+  /*
+  Mat im_with_keypoints;
 	drawKeypoints(data[0], keypoints, im_with_keypoints, Scalar(0, 0, 255), DrawMatchesFlags::DRAW_RICH_KEYPOINTS);
 
 	// Show blobs
 	imshow("keypoints", im_with_keypoints);
 	waitKey(0);
+  */
 }

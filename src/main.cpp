@@ -5,20 +5,25 @@
 
 #include <iostream>
 #include <vector>
+#include <tuple>
 
 using namespace std;
 using namespace cv;
 
-void conv2(vector<Mat> &data, vector<Mat> &bl_data, int kernel_size);
-void pickROI(vector<Mat> &data, vector<Mat> &bl_data, vector<Mat> &HR_dic, vector<Mat> &LR_dic);
+typedef vector<std::tuple<Mat, Mat, Mat, Mat>> vTuple;
+typedef vector<cv::Mat> vMat;
+typedef std::tuple<Mat, Mat, Mat, Mat> tMat;
+
+void conv2(vMat &data, vMat &bl_data, int kernel_size);
+void pickROI(vMat &data, vMat &bl_data, vTuple &HR_dic, vTuple &LR_dic);
 
 int main(int argc, char** argv){
 
   cv::String path("../data/training/*.bmp"); //select only bmp.
 
   vector<cv::String> fn;
-  vector<Mat> data, bl_data; //Blurred HR Images.
-  vector<Mat> HR_dic, LR_dic;
+  vMat data, bl_data; //Blurred HR Images.
+  vTuple HR_dic, LR_dic;
 
   cv::glob(path,fn,true); // recurse.
 
@@ -34,10 +39,12 @@ int main(int argc, char** argv){
 
   pickROI(data, bl_data, HR_dic, LR_dic);
 
+  cout << HR_dic.size() << "__" << LR_dic.size() << endl;
+
   return 0;
 }
 
-void conv2(vector<cv::Mat> &data, vector<cv::Mat> &bl_data, int kernel_size){
+void conv2(vMat &data, vMat &bl_data, int kernel_size){
 	Mat dst, kernel;
 	kernel = Mat::ones(kernel_size, kernel_size, CV_32F) / (float)(kernel_size*kernel_size);
 
@@ -48,7 +55,12 @@ void conv2(vector<cv::Mat> &data, vector<cv::Mat> &bl_data, int kernel_size){
 	}
 }
 
-void pickROI(vector<Mat> &data, vector<Mat> &bl_data, vector<Mat> &HR_dic, vector<Mat> &LR_dic){
+void pickROI(vMat &data, vMat &bl_data, vTuple &HR_dic, vTuple &LR_dic){
+
+  Mat patch_HR, patch_HR_bl;
+  Mat grad_x, grad_y, grad_bl_x, grad_bl_y;
+  Mat Lab, Lab_bl;
+  tMat HR, HR_bl;
 
 	// Setup SimpleBlobDetector parameters.
 	SimpleBlobDetector::Params params;
@@ -68,7 +80,6 @@ void pickROI(vector<Mat> &data, vector<Mat> &bl_data, vector<Mat> &HR_dic, vecto
   10 = 6   area detected
   */
 
-
 	// Set up the detector with default parameters.
 	Ptr<SimpleBlobDetector> detector = SimpleBlobDetector::create(params);
 
@@ -76,31 +87,40 @@ void pickROI(vector<Mat> &data, vector<Mat> &bl_data, vector<Mat> &HR_dic, vecto
   	// Detect blobs of important area in not blurred picture i.
   	vector<KeyPoint> keypoints;
   	detector->detect(data[i], keypoints);
-
+    /*
+    Mat im_with_keypoints;
+    drawKeypoints( data[i], keypoints, im_with_keypoints, Scalar(0,0,255), DrawMatchesFlags::DRAW_RICH_KEYPOINTS );
+    imshow("keypoints", im_with_keypoints );
+    waitKey(0);
+    */
     /*
       retrieve a cv::Size patch with the keypoints as center.
       and then create dictionaries with similar patches but one is from the HR images
       and the other is from the same images but blurred.
     */
-
     for(int j = 0; j < keypoints.size(); ++j){
-      Mat patch_HR, patch_HR_bl;
+
       getRectSubPix(data[i], cv::Size(5,5), keypoints[j].pt, patch_HR);
       getRectSubPix(bl_data[i], cv::Size(5,5), keypoints[j].pt, patch_HR_bl);
 
-      HR_dic.push_back(patch_HR);
-      LR_dic.push_back(patch_HR_bl);
+      //X & Y Gradient of ROI(Sobel Derivative)
+      Sobel( patch_HR, grad_x, CV_16S, 1, 0, 3, 1, 0, BORDER_DEFAULT );
+      Sobel( patch_HR, grad_y, CV_16S, 0, 1, 3, 1, 0, BORDER_DEFAULT );
+
+      Sobel( patch_HR_bl, grad_bl_x, CV_16S, 1, 0, 3, 1, 0, BORDER_DEFAULT );
+      Sobel( patch_HR_bl, grad_bl_y, CV_16S, 0, 1, 3, 1, 0, BORDER_DEFAULT );
+
+      //Lab values of the patch
+      cvtColor(patch_HR, Lab, CV_BGR2Lab);
+      cvtColor(patch_HR_bl, Lab_bl, CV_BGR2Lab);
+
+      //Construction of each information structure of the dictionarie
+      HR = std::make_tuple(patch_HR, Lab, grad_x, grad_y);
+      HR_bl = std::make_tuple(patch_HR_bl, Lab_bl, grad_bl_x, grad_bl_y);
+
+      //Construction of the dictionaries
+      HR_dic.push_back(HR);
+      LR_dic.push_back(HR_bl);
     }
   }
-
-	// Draw detected blobs as red circles.
-	// DrawMatchesFlags::DRAW_RICH_KEYPOINTS flag ensures the size of the circle corresponds to the size of blob
-  /*
-  Mat im_with_keypoints;
-	drawKeypoints(data[0], keypoints, im_with_keypoints, Scalar(0, 0, 255), DrawMatchesFlags::DRAW_RICH_KEYPOINTS);
-
-	// Show blobs
-	imshow("keypoints", im_with_keypoints);
-	waitKey(0);
-  */
 }

@@ -14,21 +14,64 @@ typedef vector<std::tuple<Mat, Mat, Mat, Mat>> vTuple;
 typedef vector<cv::Mat> vMat;
 typedef std::tuple<Mat, Mat, Mat, Mat> tMat;
 
+vTuple HR_dic, LR_dic;
+
+void superResolution();
+bool loadDic();
+bool constructionDictionnaires();
 void conv2(vMat &data, vMat &bl_data, int kernel_size);
 void pickROI(vMat &data, vMat &bl_data, vTuple &HR_dic, vTuple &LR_dic);
 
-int main(int argc, char** argv){
+int main(int argc, char** argv) {
+	
+	int choix = 0;
 
-  cv::String path("../data/training/*.bmp"); //select only bmp.
+	while (true){
+		cout << "__ Veuillez choisir entre : \n __ la construction des dictionnaires (1) \n __ la super résolution d'une image (2)" << endl;
+		cin >> choix;
+
+		switch (choix){
+		case 1:
+			if (constructionDictionnaires())
+				cout << "SUCCESS" << endl;
+			else
+				cout << "FAILURE" << endl;
+			break;
+
+		case 2:
+			if (HR_dic.size() > 0 && LR_dic.size() > 0)
+				superResolution();
+			else {
+				loadDic();
+				superResolution();
+			}
+			break;
+
+		default:
+			break;
+		}
+	}
+}
+
+void superResolution() {
+
+}
+
+bool loadDic() {
+	return constructionDictionnaires();
+}
+
+bool constructionDictionnaires(){
+
+  cv::String path("../data/*.bmp"); //select only bmp.
 
   vector<cv::String> fn;
   vMat data, bl_data; //Blurred HR Images.
-  vTuple HR_dic, LR_dic;
 
-  cv::glob(path,fn,true); // recurse.
-
-  for (size_t k=0; k<fn.size(); ++k){
-    Mat im = imread(fn[k]/*, IMREAD_GRAYSCALE*/);
+  glob(path,fn,false); // recurse.
+  
+  for (unsigned int k=0; k<fn.size(); ++k){
+    Mat im = imread(fn[k]);
     if( !im.data ) cout <<  "Could not open or find an image" << endl;  // Check for invalid input.
     data.push_back(im);
   }
@@ -39,9 +82,7 @@ int main(int argc, char** argv){
 
   pickROI(data, bl_data, HR_dic, LR_dic);
 
-  cout << HR_dic.size() << "__" << LR_dic.size() << endl;
-
-  return 0;
+  return HR_dic.size() == LR_dic.size();
 }
 
 void conv2(vMat &data, vMat &bl_data, int kernel_size){
@@ -83,7 +124,7 @@ void pickROI(vMat &data, vMat &bl_data, vTuple &HR_dic, vTuple &LR_dic){
 	// Set up the detector with default parameters.
 	Ptr<SimpleBlobDetector> detector = SimpleBlobDetector::create(params);
 
-  for(int i = 0; i < data.size(); ++i){
+  for(unsigned int i = 0; i < data.size(); ++i){
   	// Detect blobs of important area in not blurred picture i.
   	vector<KeyPoint> keypoints;
   	detector->detect(data[i], keypoints);
@@ -98,10 +139,17 @@ void pickROI(vMat &data, vMat &bl_data, vTuple &HR_dic, vTuple &LR_dic){
       and then create dictionaries with similar patches but one is from the HR images
       and the other is from the same images but blurred.
     */
-    for(int j = 0; j < keypoints.size(); ++j){
+    for(unsigned int j = 0; j < keypoints.size(); ++j){
 
       getRectSubPix(data[i], cv::Size(5,5), keypoints[j].pt, patch_HR);
       getRectSubPix(bl_data[i], cv::Size(5,5), keypoints[j].pt, patch_HR_bl);
+
+	  /*
+	  Mat im_with_keypoints;
+	  drawKeypoints( data[i], keypoints, im_with_keypoints, Scalar(0,0,255), DrawMatchesFlags::DRAW_RICH_KEYPOINTS );
+	  imshow("keypoints", im_with_keypoints );
+	  waitKey(0);
+	  */
 
       //X & Y Gradient of ROI(Sobel Derivative)
       Sobel( patch_HR, grad_x, CV_16S, 1, 0, 3, 1, 0, BORDER_DEFAULT );

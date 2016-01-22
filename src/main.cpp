@@ -10,21 +10,22 @@
 using namespace std;
 using namespace cv;
 
-typedef vector<std::tuple<Mat, Mat, Mat, Mat>> vTuple;
+typedef vector<std::tuple<Mat, Mat, Mat>> vTuple;
 typedef vector<cv::Mat> vMat;
-typedef std::tuple<Mat, Mat, Mat, Mat> tMat;
 
 vTuple HR_dic, LR_dic;
 
+#define PATCH_SIZE 3
+
 Scalar getMSSIM( Mat& i1, Mat& i2);
-int patch_rank_on_ssim(Mat patchBicub);
-int patch_rank_on_grad(Mat patchBicub);
-int patch_rank_on_Lab(Mat patchBicub);
+int patch_rank_on_ssim(Mat &patchBicub);
+int patch_rank_on_grad(Mat &patchBicub);
+int patch_rank_on_Lab(Mat &patchBicub);
 void superResolution();
-bool loadDic();
-bool constructionDictionnaires();
+void loadDic();
+void constructionDictionnaires();
 void conv2(vMat &data, vMat &bl_data, int kernel_size);
-void pickROI(vMat &data, vMat &bl_data, vTuple &HR_dic, vTuple &LR_dic);
+void pickROI(vMat &data, vMat &bl_data);
 
 int main(int argc, char** argv) {
 
@@ -36,10 +37,8 @@ int main(int argc, char** argv) {
 
 		switch (choix){
 		case 1:
-			if (constructionDictionnaires())
+				constructionDictionnaires();
 				cout << "SUCCESS" << endl;
-			else
-				cout << "FAILURE" << endl;
 			break;
 
 		case 2:
@@ -57,7 +56,7 @@ int main(int argc, char** argv) {
 	}
 }
 
-Scalar getMSSIM( Mat& i1, Mat& i2){
+Scalar getMSSIM( Mat& i1, Mat& i2 ){
     const double C1 = 6.5025, C2 = 58.5225;
     /***************************** INITS **********************************/
     int d     = CV_32F;
@@ -110,46 +109,55 @@ Scalar getMSSIM( Mat& i1, Mat& i2){
 }
 
 void superResolution() {
-  Mat im_source = imread( "../data/res/source.bmp" );
+	namedWindow( "Display window", WINDOW_AUTOSIZE );// Create a window for display.
+
+  Mat im_source = imread( "../data/res/source.png" );
+	Mat im_converted;
+	cvtColor(im_source, im_converted, CV_BGR2Lab);
+
 	Mat im_dest;
 	Mat patch;
 	int index = -1;
 
-	cv::resize(im_source, im_dest, Size(), 2, 2, INTER_CUBIC );
-	Mat im_final(im_dest.rows, im_dest.cols, im_dest.type());
+	resize(im_converted, im_dest, Size(), 2, 2, INTER_CUBIC );
+	Mat im_final( Size(im_dest.cols, im_dest.rows), im_dest.type());
 
-	for(int i = 2 ; i < im_dest.rows ; i+=5)
-		for(int j = 2 ; j < im_dest.cols ; j+=5){
-			getRectSubPix(im_dest, cv::Size(5,5), Point2f(i,j), patch);
-			index = patch_rank_on_ssim(patch);
-			im_final.col(j).row(i) = get<0>(HR_dic[index]);
+
+	#pragma omp parallel for
+		for(int i = 0 ; i < im_dest.rows ; i+=PATCH_SIZE){
+			for(int j = 0 ; j < im_dest.cols ; j+=PATCH_SIZE){
+				if(j+PATCH_SIZE > im_dest.cols)break;
+				getRectSubPix(im_dest, cv::Size(PATCH_SIZE,PATCH_SIZE), Point2f(i,j), patch);
+				index = patch_rank_on_grad(patch);
+				std::cout << index << std::endl;
+				Mat le_patch = get<0>(HR_dic[index]);
+				le_patch.copyTo( im_final( Rect(j, i, le_patch.cols, le_patch.rows) ));
+				imshow( "Display window", im_final );
+				waitKey(100);
+			}
+			if(i+PATCH_SIZE > im_dest.rows)break;
 		}
-
-	namedWindow( "Display window", WINDOW_AUTOSIZE );// Create a window for display.
-  imshow( "Display window", im_final );
-	waitKey(0);
 }
 
-int patch_rank_on_ssim(Mat patchBicub){
-	double score = std::numeric_limits<double>::max();
-	/*
-	 * score1 : SSIM sur les patchs
-	 */
-	vector<Scalar> ssim_scores;
-	for (unsigned int i = 0; i < HR_dic.size(); i++)
-		ssim_scores.push_back( getMSSIM(get<0>(HR_dic[i]), patchBicub) );
+// inline int patch_rank_on_ssim(Mat &patchBicub){
+// 	double score = std::numeric_limits<double>::max();
+// 	/*
+// 	* score1 : SSIM sur les patchs
+// 	*/
+// 	Scalar ssim_score, prec;
+// 	int index = -1;
+// 	double mean_actu, mean_prec = 0;
+//
+// 	for (unsigned int i = 0; i < HR_dic.size(); i++){
+// 		ssim_score = getMSSIM(get<0>(HR_dic[i]), patchBicub);
+// 		mean_actu = ( ssim_score[0] + ssim_score[1] + ssim_score[2] )/3;
+// 		if(mean_actu > mean_prec) { index = i; mean_prec = mean_actu; }
+// 	}
+//
+// 	return index;
+// }
 
-	int index = -1;
-
-	for (unsigned int i = 0; i < ssim_scores.size(); i++)
-		if(ssim_scores[i](0)<score){
-			index = i; score = ssim_scores[i](0);
-		}
-
-	return index;
-}
-
-int patch_rank_on_grad(Mat patchBicub){
+int patch_rank_on_grad(Mat &patchBicub){
 	/*
 	 * score2 : distance euclidienne entre les couples de gradient
 	 */
@@ -163,70 +171,66 @@ int patch_rank_on_grad(Mat patchBicub){
 
 	vector<double> liste_scoreX, liste_scoreY;
 
-	for (unsigned int i = 0; i < HR_dic.size(); i++) {
-		liste_scoreX.push_back( norm(get<2>(HR_dic[i]), grad_x, NORM_L2) );
-		liste_scoreY.push_back( norm(get<3>(HR_dic[i]), grad_y, NORM_L2) );
+	for (unsigned int i = 0; i < LR_dic.size(); i++) {
+		liste_scoreX.push_back( norm(get<1>(LR_dic[i]), grad_x, NORM_L2) );
+		liste_scoreY.push_back( norm(get<2>(LR_dic[i]), grad_y, NORM_L2) );
 	}
 
 	int index = 0;
 
 	for (unsigned int i = 0; i < liste_scoreX.size(); i++)
-		if( liste_scoreX[i]+liste_scoreY[i] < score){
+		if( liste_scoreX[i]+liste_scoreY[i] > score){
 			index = i; score = liste_scoreX[i]+liste_scoreY[i];
 		}
 
 	return index;
 }
 
-int patch_rank_on_Lab(Mat patchBicub){
-	double score = std::numeric_limits<double>::max();
+int patch_rank_on_Lab(Mat &patchBicub){
 	/*
-	 * score3 : Score sur la valeur L des patchs Lab
-	 */
+	 * score3 : Score sur la valeur L des patchs Lab*/
 
-	// Use the o-th channel (L)
-	int channels[] = { 0 };
-	float L_ranges[] = { 0, 100 };
-	const float* ranges[] = { L_ranges };
-	int h_bins = 50;
-	int histSize[] = { h_bins };
+	double score = 0, L_score = 0;
+	int index = -1;
+  int histSize = 256;
 
-	/// Histograms
+  //L varies from 0 to 255
+  float L_ranges[] = { 0, 256 };
+  const float* ranges = { L_ranges };
+
+	//Histograms
   MatND hist_bicub;
   MatND hist_dic;
 
-	vector<double> L_scores;
+	vector<Mat> Lab_planes;
+	split( patchBicub, Lab_planes );
 
-	for (unsigned int i = 0; i < HR_dic.size(); i++) {
-	  /// Calculate the histograms for the Lab images
-		calcHist( &patchBicub, 1, channels, Mat(), hist_bicub, 2, histSize, ranges, true, false );
+	for (unsigned int i = 0; i < LR_dic.size(); i++) {
+	  //Calculate the histograms for the Lab images
+		calcHist( &Lab_planes[0], 1, 0, Mat(), hist_bicub, 1, &histSize, &ranges, true, false );
 	  normalize( hist_bicub, hist_bicub, 0, 1, NORM_MINMAX, -1, Mat() );
 
-	  calcHist( &get<1>(HR_dic[i]), 1, channels, Mat(), hist_dic, 2, histSize, ranges, true, false );
+		vector<Mat> Lab_planes_patch;
+		split( get<0>(LR_dic[i]), Lab_planes_patch );
+
+	  calcHist( &Lab_planes_patch[0], 1, 0, Mat(), hist_dic, 1, &histSize, &ranges, true, false );
 	  normalize( hist_dic, hist_dic, 0, 1, NORM_MINMAX, -1, Mat() );
 
 		//1 = Correlation
 		//2 = Chi-Square
 		//3 = Intersection
 		//4 = Bhattacharyya
-		L_scores.push_back( compareHist( hist_bicub, hist_dic, 1 ) );
+		L_score = compareHist( hist_dic, hist_bicub, 1 );
+		if(L_score > score){index = i; score = L_score;}
 	}
-
-	int index = 0;
-
-	for (unsigned int i = 0; i < L_scores.size(); i++)
-		if( L_scores[i] < score){
-			index = i; score = L_scores[i];
-		}
-
 	return index;
 }
 
-bool loadDic() {
-	return constructionDictionnaires();
+void loadDic() {
+	constructionDictionnaires();
 }
 
-bool constructionDictionnaires(){
+void constructionDictionnaires(){
 
   cv::String path("../data/training/*.bmp"); //select only bmp.
 
@@ -245,10 +249,9 @@ bool constructionDictionnaires(){
   conv2(data, bl_data, 3);
   if(data.size() != bl_data.size()) cerr << "Error during convolution : number of images is irrelevant.";
 
-  pickROI(data, bl_data, HR_dic, LR_dic);
+  pickROI(data, bl_data);
 
-	std::cout << HR_dic.size() << "__" << LR_dic.size() << std::endl;
-  return (HR_dic.size() == LR_dic.size());
+	assert( HR_dic.size() == LR_dic.size() );
 }
 
 void conv2(vMat &data, vMat &bl_data, int kernel_size){
@@ -262,12 +265,11 @@ void conv2(vMat &data, vMat &bl_data, int kernel_size){
 	}
 }
 
-void pickROI(vMat &data, vMat &bl_data, vTuple &HR_dic, vTuple &LR_dic){
+void pickROI(vMat &data, vMat &bl_data){
 
   Mat patch_HR, patch_HR_bl;
   Mat grad_x, grad_y, grad_bl_x, grad_bl_y;
   Mat Lab, Lab_bl;
-  tMat HR, HR_bl;
 
 	// Setup SimpleBlobDetector parameters.
 	SimpleBlobDetector::Params params;
@@ -302,15 +304,11 @@ void pickROI(vMat &data, vMat &bl_data, vTuple &HR_dic, vTuple &LR_dic){
     */
     for(unsigned int j = 0; j < keypoints.size(); ++j){
 
-      getRectSubPix(data[i], Size(5,5), keypoints[j].pt, patch_HR);
-      getRectSubPix(bl_data[i], Size(5,5), keypoints[j].pt, patch_HR_bl);
+      getRectSubPix(data[i], Size(PATCH_SIZE,PATCH_SIZE), keypoints[j].pt, patch_HR);
+      getRectSubPix(bl_data[i], Size(PATCH_SIZE,PATCH_SIZE), keypoints[j].pt, patch_HR_bl);
 
-	  /*
-	  Mat im_with_keypoints;
-	  drawKeypoints( data[i], keypoints, im_with_keypoints, Scalar(0,0,255), DrawMatchesFlags::DRAW_RICH_KEYPOINTS );
-	  imshow("keypoints", im_with_keypoints );
-	  waitKey(0);
-	  */
+			//imshow("patch", patch_HR );
+	  	//waitKey(1);
 
       //Lab values of the patch
       cvtColor(patch_HR, Lab, CV_BGR2Lab);
@@ -323,13 +321,9 @@ void pickROI(vMat &data, vMat &bl_data, vTuple &HR_dic, vTuple &LR_dic){
       Sobel( Lab_bl, grad_bl_x, CV_16S, 1, 0, 3, 1, 0, BORDER_DEFAULT );
       Sobel( Lab_bl, grad_bl_y, CV_16S, 0, 1, 3, 1, 0, BORDER_DEFAULT );
 
-      //Construction of each information structure of the dictionarie
-      HR = std::make_tuple(patch_HR, Lab, grad_x, grad_y);
-      HR_bl = std::make_tuple(patch_HR_bl, Lab_bl, grad_bl_x, grad_bl_y);
-
       //Construction of the dictionaries
-      HR_dic.push_back(HR);
-      LR_dic.push_back(HR_bl);
+      HR_dic.push_back( make_tuple(Lab, grad_x, grad_y) );
+      LR_dic.push_back( make_tuple(Lab_bl, grad_bl_x, grad_bl_y) );
     }
   }
 }

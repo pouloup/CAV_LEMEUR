@@ -15,7 +15,7 @@ typedef vector<cv::Mat> vMat;
 
 vTuple HR_dic, LR_dic;
 
-#define PATCH_SIZE 3
+#define PATCH_SIZE 15
 
 Scalar getMSSIM(Mat& i1, Mat& i2);
 int patch_rank_on_ssim(Mat &patchBicub);
@@ -129,12 +129,12 @@ void superResolution() {
 			if (j + PATCH_SIZE > im_dest.cols)break;
 			getRectSubPix(im_dest, cv::Size(PATCH_SIZE, PATCH_SIZE), Point2f(i, j), patch);
 			index = patch_rank_on_grad(patch);
-			
-			std::cout << index << std::endl;
-			
+
+			//std::cout << index << std::endl;
+
 			Mat le_patch = get<0>(HR_dic[index]);
 			le_patch.copyTo(im_final(Rect(j, i, le_patch.cols, le_patch.rows)));
-			
+
 			imshow("Display window", im_final);
 			waitKey(100);
 		}
@@ -142,7 +142,7 @@ void superResolution() {
 	}
 }
 
-inline 
+inline
 int patch_rank_on_ssim(Mat &patchBicub){
 	/*
 	* score1 : SSIM sur les patchs*/
@@ -179,7 +179,7 @@ int patch_rank_on_grad(Mat &patchBicub) {
 	convertScaleAbs(grad_x, abs_grad_x);
 	convertScaleAbs(grad_y, abs_grad_y);
 	addWeighted(abs_grad_x, 0.5, abs_grad_y, 0.5, 0, grad);
-	
+
 	for (unsigned int i = 0; i < LR_dic.size(); i++) {
 		score = norm(get<1>(LR_dic[i]), grad, NORM_L2);
 		if (score < prec) { prec = score; index = i; }

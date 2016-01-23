@@ -15,7 +15,7 @@ typedef vector<cv::Mat> vMat;
 
 vTuple HR_dic, LR_dic;
 
-#define PATCH_SIZE 15
+#define PATCH_SIZE 8
 
 Scalar getMSSIM(Mat& i1, Mat& i2);
 int patch_rank_on_ssim(Mat &patchBicub);
@@ -123,23 +123,25 @@ void superResolution() {
 	Mat im_final(Size(im_dest.cols, im_dest.rows), im_dest.type());
 
 
-#pragma omp parallel for
-	for (int i = 0; i < im_dest.rows; i += PATCH_SIZE) {
-		for (int j = 0; j < im_dest.cols; j += PATCH_SIZE) {
-			if (j + PATCH_SIZE > im_dest.cols)break;
-			getRectSubPix(im_dest, cv::Size(PATCH_SIZE, PATCH_SIZE), Point2f(i, j), patch);
-			index = patch_rank_on_grad(patch);
+	#pragma omp parallel for
+		for (int i = 0; i < im_dest.rows; i += PATCH_SIZE) {
+			for (int j = 0; j < im_dest.cols; j += PATCH_SIZE) {
+				if (j + PATCH_SIZE > im_dest.cols)break;
+				getRectSubPix(im_dest, cv::Size(PATCH_SIZE, PATCH_SIZE), Point2f(i, j), patch);
+				index = patch_rank_on_grad(patch);
 
-			//std::cout << index << std::endl;
+				std::cout << index << std::endl;
 
-			Mat le_patch = get<0>(HR_dic[index]);
-			le_patch.copyTo(im_final(Rect(j, i, le_patch.cols, le_patch.rows)));
+				Mat le_patch = get<0>(HR_dic[index]);
+				Mat le_patch_bgr;
+				cvtColor(le_patch, le_patch_bgr, CV_Lab2BGR);
+				le_patch_bgr.copyTo(im_final(Rect(j, i, le_patch.cols, le_patch.rows)));
 
-			imshow("Display window", im_final);
-			waitKey(100);
+				imshow("Display window", im_final);
+				waitKey(100);
+			}
+			if (i + PATCH_SIZE > im_dest.rows)break;
 		}
-		if (i + PATCH_SIZE > im_dest.rows)break;
-	}
 }
 
 inline
@@ -285,7 +287,7 @@ void pickROI(vMat &data, vMat &bl_data) {
 
 	// Filter by Area.
 	params.filterByArea = true;
-	params.minArea = 5;
+	params.minArea = 3;
 	/*
 	1  = 157 area detected
 	3  = 74  area detected

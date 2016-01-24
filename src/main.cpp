@@ -10,24 +10,23 @@
 using namespace std;
 using namespace cv;
 
-typedef vector<std::tuple<Mat, Mat>> vTuple;
+typedef vector<std::tuple<Mat*, Mat*>> vTuple;
 typedef vector<cv::Mat> vMat;
 
-vTuple HR_dic, LR_dic;
-
-#define PATCH_SIZE 8
+#define PATCH_SIZE 3
 
 Scalar getMSSIM(Mat& i1, Mat& i2);
-int patch_rank_on_ssim(Mat &patchBicub);
-int patch_rank_on_grad(Mat &patchBicub);
-int patch_rank_on_Lab(Mat &patchBicub);
-void superResolution();
-void loadDic();
-void constructionDictionnaires();
+int patch_rank_on_ssim(vTuple &LR_dic, Mat &patchBicub);
+int patch_rank_on_grad(vTuple &LR_dic, Mat &patchBicub);
+int patch_rank_on_Lab(vTuple &LR_dic, Mat &patchBicub);
+void superResolution(vTuple &HR_dic, vTuple &LR_dic);
+void constructionDictionnaires(vTuple &HR_dic, vTuple &LR_dic);
 void conv2(vMat &data, vMat &bl_data, int kernel_size);
-void pickROI(vMat &data, vMat &bl_data);
+void pickROI(vTuple &HR_dic, vTuple &LR_dic, vMat &data, vMat &bl_data);
 
 int main(int argc, char** argv) {
+
+	vTuple HR_dic, LR_dic;
 
 	int choix = 0;
 
@@ -37,16 +36,17 @@ int main(int argc, char** argv) {
 
 		switch (choix) {
 		case 1:
-			constructionDictionnaires();
+			constructionDictionnaires(HR_dic, LR_dic);
 			cout << "SUCCESS" << endl;
 			break;
 
 		case 2:
 			if (HR_dic.size() > 0 && LR_dic.size() > 0)
-				superResolution();
+				superResolution(HR_dic, LR_dic);
 			else {
-				loadDic();
-				superResolution();
+				constructionDictionnaires(HR_dic, LR_dic);
+				superResolution(HR_dic, LR_dic);
+				return EXIT_SUCCESS;
 			}
 			break;
 
@@ -108,12 +108,10 @@ Scalar getMSSIM(Mat& i1, Mat& i2) {
 	return mssim;
 }
 
-void superResolution() {
-	namedWindow("Display window", WINDOW_AUTOSIZE);// Create a window for display.
+void superResolution(vTuple &HR_dic, vTuple &LR_dic) {
 
 	Mat im_source = imread("../data/res/source.png");
-	//Mat im_converted;
-	//cvtColor(im_source, im_converted, CV_BGR2Lab);
+	Mat le_patch;
 
 	Mat im_dest;
 	Mat patch;
@@ -128,24 +126,22 @@ void superResolution() {
 			for (int j = 0; j < im_dest.cols; j += PATCH_SIZE) {
 				if (j + PATCH_SIZE > im_dest.cols)break;
 				getRectSubPix(im_dest, cv::Size(PATCH_SIZE, PATCH_SIZE), Point2f(i, j), patch);
-				index = patch_rank_on_grad(patch);
-
-				std::cout << index << std::endl;
-
-				Mat le_patch = get<0>(HR_dic[index]);
-				Mat le_patch_bgr;
-				cvtColor(le_patch, le_patch_bgr, CV_Lab2BGR);
-				le_patch_bgr.copyTo(im_final(Rect(j, i, le_patch.cols, le_patch.rows)));
-
-				imshow("Display window", im_final);
-				waitKey(100);
+				index = patch_rank_on_Lab(LR_dic, patch);
+				//std::cout << index << std::endl;
+				le_patch = *get<0>(HR_dic[index]);
+				le_patch.copyTo(im_final(Rect(j, i, le_patch.cols, le_patch.rows)));
 			}
 			if (i + PATCH_SIZE > im_dest.rows)break;
 		}
+
+		Mat im;
+		cvtColor(im_final, im, CV_Lab2BGR);
+		imwrite("../data/res/res.png", im);
+		imwrite("../data/res/src_bicub.png", im_dest);
 }
 
 inline
-int patch_rank_on_ssim(Mat &patchBicub){
+int patch_rank_on_ssim(vTuple &LR_dic, Mat &patchBicub){
 	/*
 	* score1 : SSIM sur les patchs*/
 
@@ -155,8 +151,8 @@ int patch_rank_on_ssim(Mat &patchBicub){
 	int index = -1;
 	double mean_actu, mean_prec = 0;
 
-	for (unsigned int i = 0; i < HR_dic.size(); i++){
- 		ssim_score = getMSSIM(get<0>(HR_dic[i]), patchBicub);
+	for (unsigned int i = 0; i < LR_dic.size(); i++){
+ 		ssim_score = getMSSIM(*get<0>(LR_dic[i]), patchBicub);
  		mean_actu = ( ssim_score[0] + ssim_score[1] + ssim_score[2] )/3;
  		if(mean_actu > mean_prec) { index = i; mean_prec = mean_actu; }
 	}
@@ -164,16 +160,16 @@ int patch_rank_on_ssim(Mat &patchBicub){
 	return index;
 }
 
-int patch_rank_on_grad(Mat &patchBicub) {
+int patch_rank_on_grad(vTuple &LR_dic, Mat &patchBicub) {
 	/*
 	 * score2 : distance euclidienne entre les couples de gradient*/
 
 	int index = -1;
 	double score = std::numeric_limits<double>::max(), prec = std::numeric_limits<double>::max();
-	Mat patch_gray;
+	// Mat patch_gray;
 	Mat grad_x, grad_y, abs_grad_x, abs_grad_y, grad;
 
-	cvtColor(patchBicub, patch_gray, CV_BGR2GRAY);
+	// cvtColor(patchBicub, patch_gray, CV_BGR2GRAY);
 
 	//Gradient of bicubic patch
 	Sobel(patchBicub, grad_x, CV_16S, 0, 1, 3, 1, 0, BORDER_DEFAULT);
@@ -183,17 +179,17 @@ int patch_rank_on_grad(Mat &patchBicub) {
 	addWeighted(abs_grad_x, 0.5, abs_grad_y, 0.5, 0, grad);
 
 	for (unsigned int i = 0; i < LR_dic.size(); i++) {
-		score = norm(get<1>(LR_dic[i]), grad, NORM_L2);
+		score = norm(*get<1>(LR_dic[i]), grad, NORM_L2);
 		if (score < prec) { prec = score; index = i; }
 	}
 	return index;
 }
 
-int patch_rank_on_Lab(Mat &patchBicub) {
+int patch_rank_on_Lab(vTuple &LR_dic, Mat &patchBicub) {
 	/*
 	 * score3 : Score sur la valeur L des patchs Lab*/
 
-	double score = 0, L_score = 0;
+	double score = std::numeric_limits<double>::max(), L_score = 0;
 	int index = -1;
 	int histSize = 256;
 
@@ -209,34 +205,27 @@ int patch_rank_on_Lab(Mat &patchBicub) {
 	cvtColor(patchBicub, patch_Lab, CV_BGR2Lab);
 
 	vector<Mat> Lab_planes;
+	vector<Mat> Lab_planes_patch;
 	split(patch_Lab, Lab_planes);
 
-	for (unsigned int i = 0; i < LR_dic.size(); i++) {
-		//Calculate the histograms for the Lab images
-		calcHist(&Lab_planes[0], 1, 0, Mat(), hist_bicub, 1, &histSize, &ranges, true, false);
-		normalize(hist_bicub, hist_bicub, 0, 1, NORM_MINMAX, -1, Mat());
+	//Calculate the histograms for the Lab images
+	calcHist(&Lab_planes[0], 1, 0, Mat(), hist_bicub, 1, &histSize, &ranges, true, false);
+	normalize(hist_bicub, hist_bicub, 0, 1, NORM_MINMAX, -1, Mat());
 
-		vector<Mat> Lab_planes_patch;
-		split(get<0>(LR_dic[i]), Lab_planes_patch);
+	for (unsigned int i = 0; i < LR_dic.size(); i++) {
+		split(*get<0>(LR_dic[i]), Lab_planes_patch);
 
 		calcHist(&Lab_planes_patch[0], 1, 0, Mat(), hist_dic, 1, &histSize, &ranges, true, false);
 		normalize(hist_dic, hist_dic, 0, 1, NORM_MINMAX, -1, Mat());
 
-		//1 = Correlation
-		//2 = Chi-Square
-		//3 = Intersection
-		//4 = Bhattacharyya
+		//1 = Correlation		//2 = Chi-Square		//3 = Intersection		//4 = Bhattacharyya
 		L_score = compareHist(hist_dic, hist_bicub, 4);
-		if (L_score > score) { index = i; score = L_score; }
+		if (L_score < score) { index = i; score = L_score; }
 	}
 	return index;
 }
 
-void loadDic() {
-	constructionDictionnaires();
-}
-
-void constructionDictionnaires() {
+void constructionDictionnaires(vTuple &HR_dic, vTuple &LR_dic) {
 
 	cv::String path("../data/training/*.bmp"); //select only bmp.
 
@@ -255,7 +244,7 @@ void constructionDictionnaires() {
 	conv2(data, bl_data, 3);
 	if (data.size() != bl_data.size()) cerr << "Error during convolution : number of images is irrelevant.";
 
-	pickROI(data, bl_data);
+	pickROI(HR_dic, LR_dic, data, bl_data);
 
 	assert(HR_dic.size() == LR_dic.size());
 }
@@ -271,12 +260,11 @@ void conv2(vMat &data, vMat &bl_data, int kernel_size) {
 	}
 }
 
-void pickROI(vMat &data, vMat &bl_data) {
+void pickROI(vTuple &HR_dic, vTuple &LR_dic, vMat &data, vMat &bl_data) {
 
 	Mat patch_HR, patch_HR_bl;
 	Mat grad_x, grad_y, grad_bl_x, grad_bl_y;
 	Mat abs_grad_x, abs_grad_y, abs_grad_bl_x, abs_grad_bl_y;
-	Mat Lab, Lab_bl;
 
 	// Setup SimpleBlobDetector parameters.
 	SimpleBlobDetector::Params params;
@@ -318,28 +306,45 @@ void pickROI(vMat &data, vMat &bl_data) {
 			//waitKey(1);
 
 			//Lab values of the patch
-			cvtColor(patch_HR, Lab, CV_BGR2Lab);
-			cvtColor(patch_HR_bl, Lab_bl, CV_BGR2Lab);
+			Mat *Lab = new Mat();
+			Mat *Lab_bl = new Mat();
+			cvtColor(patch_HR, *Lab, CV_BGR2Lab);
+			cvtColor(patch_HR_bl, *Lab_bl, CV_BGR2Lab);
 
 			//X & Y Gradient of ROI(Sobel Derivative) on Lab values.
-			Sobel(Lab, grad_x, CV_16S, 1, 0, 3, 1, 0, BORDER_DEFAULT);
-			Sobel(Lab, grad_y, CV_16S, 0, 1, 3, 1, 0, BORDER_DEFAULT);
+			// Mat patch_HR_gray;
+			// cvtColor(patch_HR, patch_HR_gray, CV_BGR2GRAY);
+
+			Sobel(patch_HR, grad_x, CV_16S, 1, 0, 3, 1, 0, BORDER_DEFAULT);
+			Sobel(patch_HR, grad_y, CV_16S, 0, 1, 3, 1, 0, BORDER_DEFAULT);
 			convertScaleAbs(grad_x, abs_grad_x);
 			convertScaleAbs(grad_y, abs_grad_y);
 
 			//X & Y Gradient of blurred ROI(Sobel Derivative) on Lab values.
-			Sobel(Lab_bl, grad_bl_x, CV_16S, 1, 0, 3, 1, 0, BORDER_DEFAULT);
-			Sobel(Lab_bl, grad_bl_y, CV_16S, 0, 1, 3, 1, 0, BORDER_DEFAULT);
+			// Mat patch_HR_gray_bl;
+			// cvtColor(patch_HR_bl, patch_HR_gray_bl, CV_BGR2GRAY);
+
+			Sobel(patch_HR_bl, grad_bl_x, CV_16S, 1, 0, 3, 1, 0, BORDER_DEFAULT);
+			Sobel(patch_HR_bl, grad_bl_y, CV_16S, 0, 1, 3, 1, 0, BORDER_DEFAULT);
 			convertScaleAbs(grad_bl_x, abs_grad_bl_x);
 			convertScaleAbs(grad_bl_y, abs_grad_bl_y);
 
-			Mat grad, grad_bl;
-			addWeighted(abs_grad_x, 0.5, abs_grad_y, 0.5, 0, grad);
-			addWeighted(abs_grad_bl_x, 0.5, abs_grad_bl_y, 0.5, 0, grad_bl);
+			Mat *grad = new Mat();
+			Mat *grad_bl = new Mat();
+			addWeighted(abs_grad_x, 0.5, abs_grad_y, 0.5, 0, *grad);
+			addWeighted(abs_grad_bl_x, 0.5, abs_grad_bl_y, 0.5, 0, *grad_bl);
+
+			std::tuple<Mat*, Mat*> hr_pair = make_tuple(Lab, grad);
+			std::tuple<Mat*, Mat*> lr_pair = make_tuple(Lab_bl, grad_bl);
 
 			//Construction of the dictionaries
-			HR_dic.push_back(make_tuple(Lab, grad));
-			LR_dic.push_back(make_tuple(Lab_bl, grad_bl));
+			LR_dic.push_back(lr_pair);
+			HR_dic.push_back(hr_pair);
+
+			// namedWindow("Display window", WINDOW_AUTOSIZE);// Create a window for display.
+			// imshow("Display window", Lab );
+			// waitKey(1);
+
 		}
 	}
 }

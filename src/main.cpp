@@ -113,31 +113,29 @@ void superResolution(vTuple &HR_dic, vTuple &LR_dic) {
 	Mat im_source = imread("../data/res/source.png");
 	Mat le_patch;
 
-	Mat im_dest;
+	Mat im_bicub;
 	Mat patch;
 	int index = -1;
 
-	resize(im_source, im_dest, Size(), 2, 2, INTER_CUBIC);
-	Mat im_final(Size(im_dest.cols, im_dest.rows), im_dest.type());
-
+	resize(im_source, im_bicub, Size(), 2, 2, INTER_CUBIC);
+	Mat im_final(Size(im_bicub.cols, im_bicub.rows), im_bicub.type());
 
 	#pragma omp parallel for
-		for (int i = 0; i < im_dest.rows; i += PATCH_SIZE) {
-			for (int j = 0; j < im_dest.cols; j += PATCH_SIZE) {
-				if (j + PATCH_SIZE > im_dest.cols)break;
-				getRectSubPix(im_dest, cv::Size(PATCH_SIZE, PATCH_SIZE), Point2f(i, j), patch);
+		for (int i = 0; i < im_bicub.rows; i += PATCH_SIZE) {
+			for (int j = 0; j < im_bicub.cols; j += PATCH_SIZE) {
+				if (j + PATCH_SIZE > im_bicub.cols)break;
+				getRectSubPix(im_bicub, cv::Size(PATCH_SIZE, PATCH_SIZE), Point2f(i, j), patch);
 				index = patch_rank_on_Lab(LR_dic, patch);
-				//std::cout << index << std::endl;
 				le_patch = *get<0>(HR_dic[index]);
-				le_patch.copyTo(im_final(Rect(j, i, le_patch.cols, le_patch.rows)));
+				le_patch.copyTo(im_final(Rect(i, j, le_patch.rows, le_patch.cols)));
 			}
-			if (i + PATCH_SIZE > im_dest.rows)break;
+			if (i + PATCH_SIZE > im_bicub.rows)break;
 		}
 
 		Mat im;
-		cvtColor(im_final, im, CV_Lab2BGR);
+		cvtColor(im_final, im, CV_Lab2RGB);
 		imwrite("../data/res/res.png", im);
-		imwrite("../data/res/src_bicub.png", im_dest);
+		imwrite("../data/res/src_bicub.png", im_bicub);
 }
 
 inline
@@ -150,16 +148,18 @@ int patch_rank_on_ssim(vTuple &LR_dic, Mat &patchBicub){
 	Scalar ssim_score, prec;
 	int index = -1;
 	double mean_actu, mean_prec = 0;
-
-	for (unsigned int i = 0; i < LR_dic.size(); i++){
- 		ssim_score = getMSSIM(*get<0>(LR_dic[i]), patchBicub);
- 		mean_actu = ( ssim_score[0] + ssim_score[1] + ssim_score[2] )/3;
- 		if(mean_actu > mean_prec) { index = i; mean_prec = mean_actu; }
-	}
+	
+	#pragma omp parallel for
+		for (unsigned int i = 0; i < LR_dic.size(); i++){
+ 			ssim_score = getMSSIM(*get<0>(LR_dic[i]), patchBicub);
+ 			mean_actu = ( ssim_score[0] + ssim_score[1] + ssim_score[2] )/3;
+ 			if(mean_actu > mean_prec) { index = i; mean_prec = mean_actu; }
+		}
 
 	return index;
 }
 
+inline
 int patch_rank_on_grad(vTuple &LR_dic, Mat &patchBicub) {
 	/*
 	 * score2 : distance euclidienne entre les couples de gradient*/
@@ -178,13 +178,15 @@ int patch_rank_on_grad(vTuple &LR_dic, Mat &patchBicub) {
 	convertScaleAbs(grad_y, abs_grad_y);
 	addWeighted(abs_grad_x, 0.5, abs_grad_y, 0.5, 0, grad);
 
-	for (unsigned int i = 0; i < LR_dic.size(); i++) {
-		score = norm(*get<1>(LR_dic[i]), grad, NORM_L2);
-		if (score < prec) { prec = score; index = i; }
-	}
+	#pragma omp parallel for
+		for (unsigned int i = 0; i < LR_dic.size(); i++) {
+			score = norm(*get<1>(LR_dic[i]), grad, NORM_L2);
+			if (score < prec) { prec = score; index = i; }
+		}
 	return index;
 }
 
+inline
 int patch_rank_on_Lab(vTuple &LR_dic, Mat &patchBicub) {
 	/*
 	 * score3 : Score sur la valeur L des patchs Lab*/
@@ -211,17 +213,18 @@ int patch_rank_on_Lab(vTuple &LR_dic, Mat &patchBicub) {
 	//Calculate the histograms for the Lab images
 	calcHist(&Lab_planes[0], 1, 0, Mat(), hist_bicub, 1, &histSize, &ranges, true, false);
 	normalize(hist_bicub, hist_bicub, 0, 1, NORM_MINMAX, -1, Mat());
+	
+	#pragma omp parallel for
+		for (unsigned int i = 0; i < LR_dic.size(); i++) {
+			split(*get<0>(LR_dic[i]), Lab_planes_patch);
 
-	for (unsigned int i = 0; i < LR_dic.size(); i++) {
-		split(*get<0>(LR_dic[i]), Lab_planes_patch);
+			calcHist(&Lab_planes_patch[0], 1, 0, Mat(), hist_dic, 1, &histSize, &ranges, true, false);
+			normalize(hist_dic, hist_dic, 0, 1, NORM_MINMAX, -1, Mat());
 
-		calcHist(&Lab_planes_patch[0], 1, 0, Mat(), hist_dic, 1, &histSize, &ranges, true, false);
-		normalize(hist_dic, hist_dic, 0, 1, NORM_MINMAX, -1, Mat());
-
-		//1 = Correlation		//2 = Chi-Square		//3 = Intersection		//4 = Bhattacharyya
-		L_score = compareHist(hist_dic, hist_bicub, 4);
-		if (L_score < score) { index = i; score = L_score; }
-	}
+			//1 = Correlation		//2 = Chi-Square		//3 = Intersection		//4 = Bhattacharyya
+			L_score = compareHist(hist_dic, hist_bicub, 4);
+			if (L_score < score) { index = i; score = L_score; }
+		}
 	return index;
 }
 

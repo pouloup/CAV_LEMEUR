@@ -16,6 +16,7 @@ typedef vector<cv::Mat> vMat;
 #define PATCH_SIZE 3
 
 Scalar getMSSIM(Mat& i1, Mat& i2);
+void rotate(cv::Mat& src, double angle, cv::Mat& dst);
 int patch_rank_on_ssim(vTuple &LR_dic, Mat &patchBicub);
 int patch_rank_on_grad(vTuple &LR_dic, Mat &patchBicub);
 int patch_rank_on_Lab(vTuple &LR_dic, Mat &patchBicub);
@@ -108,6 +109,14 @@ Scalar getMSSIM(Mat& i1, Mat& i2) {
 	return mssim;
 }
 
+void rotate(cv::Mat& src, double angle, cv::Mat& dst){
+    int len = std::max(src.cols, src.rows);
+    cv::Point2f pt(len/2., len/2.);
+    cv::Mat r = cv::getRotationMatrix2D(pt, angle, 1.0);
+
+    cv::warpAffine(src, dst, r, cv::Size(len, len));
+}
+
 void superResolution(vTuple &HR_dic, vTuple &LR_dic) {
 
 	Mat im_source = imread("../data/res/source.png");
@@ -116,6 +125,8 @@ void superResolution(vTuple &HR_dic, vTuple &LR_dic) {
 	Mat im_bicub;
 	Mat patch;
 	int index = -1;
+
+	//namedWindow("a", WINDOW_AUTOSIZE);
 
 	resize(im_source, im_bicub, Size(), 2, 2, INTER_CUBIC);
 	Mat im_final(Size(im_bicub.cols, im_bicub.rows), im_bicub.type());
@@ -127,15 +138,21 @@ void superResolution(vTuple &HR_dic, vTuple &LR_dic) {
 				getRectSubPix(im_bicub, cv::Size(PATCH_SIZE, PATCH_SIZE), Point2f(i, j), patch);
 				index = patch_rank_on_Lab(LR_dic, patch);
 				le_patch = *get<0>(HR_dic[index]);
-				le_patch.copyTo(im_final(Rect(i, j, le_patch.rows, le_patch.cols)));
+				le_patch.copyTo(im_final(Rect(j, i, le_patch.cols, le_patch.rows)));
+				// imshow("a", im_final);
+				// waitKey(1);
 			}
 			if (i + PATCH_SIZE > im_bicub.rows)break;
 		}
 
-		Mat im;
-		cvtColor(im_final, im, CV_Lab2RGB);
-		imwrite("../data/res/res.png", im);
-		imwrite("../data/res/src_bicub.png", im_bicub);
+		Mat im, im_temp, im_save;
+
+		rotate(im_final, -90.0, im_temp);
+		cv::flip(im_temp, im, 1);
+
+		cvtColor(im, im_save, CV_Lab2BGR);
+		imwrite("../data/res/resBGRpatch3_v2_grad.jpg", im_save);
+		// imwrite("../data/res/src_bicub.png", im_bicub);
 }
 
 inline
@@ -148,7 +165,7 @@ int patch_rank_on_ssim(vTuple &LR_dic, Mat &patchBicub){
 	Scalar ssim_score, prec;
 	int index = -1;
 	double mean_actu, mean_prec = 0;
-	
+
 	#pragma omp parallel for
 		for (unsigned int i = 0; i < LR_dic.size(); i++){
  			ssim_score = getMSSIM(*get<0>(LR_dic[i]), patchBicub);
@@ -213,7 +230,7 @@ int patch_rank_on_Lab(vTuple &LR_dic, Mat &patchBicub) {
 	//Calculate the histograms for the Lab images
 	calcHist(&Lab_planes[0], 1, 0, Mat(), hist_bicub, 1, &histSize, &ranges, true, false);
 	normalize(hist_bicub, hist_bicub, 0, 1, NORM_MINMAX, -1, Mat());
-	
+
 	#pragma omp parallel for
 		for (unsigned int i = 0; i < LR_dic.size(); i++) {
 			split(*get<0>(LR_dic[i]), Lab_planes_patch);
